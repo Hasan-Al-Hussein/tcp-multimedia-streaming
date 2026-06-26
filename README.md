@@ -2,11 +2,24 @@
 
 Multithreaded multimedia streaming system implemented in C and deployed across a routed TCP/IP network environment.
 
+> Low-level networking project that streams audio and video through a custom TCP client-server architecture, then validates behavior with Wireshark across routed subnets.
+
 <p align="center">
   <img src="images/network_topology.png" width="1200"/>
 </p>
 
 ---
+
+## Project Snapshot
+
+| Area | Details |
+|---|---|
+| Language | C |
+| Architecture | Multithreaded TCP client-server |
+| Media | Audio and video streaming |
+| Playback | SDL video rendering + FFmpeg/ffplay audio |
+| Network | Multi-subnet routed Cisco environment |
+| Validation | Wireshark packet analysis and router CLI checks |
 
 # Overview
 
@@ -104,7 +117,7 @@ Static routing was configured manually to enable:
 ```text
 src/
 ├── Media_server.c
-├── Media_client.c
+└── Media_client.c
 ```
 
 ### Media_server.c
@@ -120,6 +133,28 @@ Responsible for:
 - Stream reception
 - SDL rendering
 - Audio playback using FFmpeg
+
+---
+
+# Build and Run
+
+Typical local build flow:
+
+```bash
+gcc src/Media_server.c -o media_server -lpthread
+gcc src/Media_client.c -o media_client -lSDL2
+```
+
+Run the server on the host machine, then connect from the client using the server IP address reachable across the routed topology.
+
+---
+
+# Engineering Highlights
+
+- Designed a persistent TCP session for continuous media transfer.
+- Used multithreading to support responsive client handling.
+- Validated packet flow through Wireshark instead of relying only on application output.
+- Tested the system across routed subnets to exercise realistic networking behavior.
 
 ---
 
