@@ -1,3 +1,9 @@
+<div align="center">
+  <img src="assets/repository-banner.svg" width="100%" alt="Multithreaded TCP multimedia streaming system" />
+  <br /><br />
+  <a href="https://github.com/Hasan-Al-Hussein"><img src="https://img.shields.io/badge/ENGINEERING_PORTFOLIO-0F172A?style=for-the-badge&logo=github&logoColor=white" alt="Back to Hasan Al Hussein's engineering portfolio" /></a>
+</div>
+
 # TCP Multimedia Streaming System
 
 Multithreaded multimedia streaming system implemented in C and deployed across a routed TCP/IP network environment.
