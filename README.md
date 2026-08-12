@@ -2,232 +2,159 @@
   <img src="assets/repository-banner.svg" width="100%" alt="Multithreaded TCP multimedia streaming system" />
   <br /><br />
   <a href="https://github.com/Hasan-Al-Hussein"><img src="https://img.shields.io/badge/ENGINEERING_PORTFOLIO-0F172A?style=for-the-badge&logo=github&logoColor=white" alt="Back to Hasan Al Hussein's engineering portfolio" /></a>
+  <img src="https://img.shields.io/badge/C-POSIX-00599C?style=for-the-badge&logo=c&logoColor=white" alt="C and POSIX" />
+  <img src="https://img.shields.io/badge/TCP%2FIP-PERSISTENT_SESSION-2563EB?style=for-the-badge" alt="Persistent TCP/IP session" />
+  <img src="https://img.shields.io/badge/PTHREADS-CONCURRENT-6F42C1?style=for-the-badge" alt="Concurrent pthread server" />
 </div>
 
 # TCP Multimedia Streaming System
 
-Multithreaded multimedia streaming system implemented in C and deployed across a routed TCP/IP network environment.
+**A concurrent C client-server system that streams audio and video across routed TCP/IP networks through a persistent application protocol.**
 
-> Low-level networking project that streams audio and video through a custom TCP client-server architecture, then validates behavior with Wireshark across routed subnets.
+The project goes beyond file transfer: the server maintains a stateful media session, supports concurrent clients, and handles partial socket writes and mid-stream aborts. The client receives and saves each stream while piping it into FFmpeg/ffplay or mpv for immediate playback, with pause, resume, exit, and player-failure recovery.
 
 <p align="center">
-  <img src="images/network_topology.png" width="1200"/>
+  <img src="images/network_topology.png" width="1100" alt="Routed TCP multimedia network topology" />
 </p>
 
----
+## Project snapshot
 
-## Project Snapshot
-
-| Area | Details |
+| Area | Implementation |
 |---|---|
-| Language | C |
-| Architecture | Multithreaded TCP client-server |
-| Media | Audio and video streaming |
-| Playback | SDL video rendering + FFmpeg/ffplay audio |
-| Network | Multi-subnet routed Cisco environment |
-| Validation | Wireshark packet analysis and router CLI checks |
+| Core | More than 1,700 lines of C across client and server |
+| Server | POSIX sockets, thread-per-client concurrency, pthread mutex, persistent sessions |
+| Protocol | Line-delimited commands plus `SIZE <bytes> <safe_name>` framing and raw media bytes |
+| Client I/O | `select()` multiplexing across the TCP socket and terminal controls |
+| Playback | Audio through FFmpeg/ffplay; video through mpv with low-latency options |
+| Reliability | Complete-write loops, disconnect handling, abort signaling, process and terminal cleanup |
+| Network | Multi-subnet Cisco topology with static routing |
+| Validation | Wireshark packet analysis, router CLI checks, and end-to-end media playback |
 
-# Overview
-
-This project implements a complete real-time multimedia streaming architecture using low-level socket programming, multithreaded client-server communication, SDL video playback, and FFmpeg-based audio streaming.
-
-The system was deployed and validated across a routed Cisco network environment using static routing and Wireshark packet analysis. Instead of traditional file transfer, the system streams media continuously in real time using a custom TCP-based application-layer protocol.
-
----
-
-# System Architecture
+## Architecture
 
 <p align="center">
-  <img src="images/system_architecture.png" width="1200"/>
+  <img src="images/system_architecture.png" width="1100" alt="TCP multimedia system architecture" />
 </p>
 
-The architecture is divided into three major layers:
+```text
+Interactive client
+  -> persistent TCP session on port 9000
+     -> category / file selection protocol
+        -> thread-per-client server
+           -> SIZE header + throttled media byte stream
+              -> client file sink + playback pipe
+                 -> ffplay (audio) / mpv (video)
 
-- **Application Layer**  
-  Handles media streaming, client interaction, SDL rendering, and FFmpeg playback.
+Control path: terminal input -> select() -> pause/resume or ABORT
+Network path: client subnet -> Cisco routing -> server subnet
+```
 
-- **Transport Layer**  
-  Maintains persistent TCP connections for reliable byte-level streaming.
+The server owns the catalog and one menu-state machine per client. A mutex protects only shared client-ID allocation; each detached worker thread otherwise owns its socket and session state. This keeps concurrent sessions isolated without serializing the streaming path.
 
-- **Network Layer**  
-  Uses routed multi-subnet infrastructure with Cisco routers and static routing.
+## Application protocol
 
----
+The protocol separates newline-delimited control messages from fixed-length media bodies:
 
-# Live Streaming Demonstration
+```text
+server -> client: menu lines ... END\n
+client -> server: <category | file | back | exit>\n
+server -> client: SIZE <byte_count> <sanitized_filename>\n
+server -> client: exactly <byte_count> raw bytes
+client -> server: ABORT\n       (optional during transfer)
+```
+
+Important protocol details:
+
+- `send_all()` retries partial writes until every header or menu byte is transmitted.
+- The file size gives the receiver an exact message boundary on a byte-stream transport.
+- Filenames are sanitized before inclusion in the wire header.
+- `select()` lets the server observe abort commands during transfer and lets the client react to both socket and keyboard input.
+- One connection can browse and play multiple titles without reconnecting.
+
+## Concurrent server
+
+`src/Media_server.c` implements:
+
+- socket creation, `SO_REUSEADDR`, bind, listen, and a continuous accept loop;
+- a detached POSIX thread for every accepted client;
+- mutex-protected assignment of unique client IDs;
+- per-client category and file-selection state;
+- audio/video type detection and file-size discovery;
+- chunked, throttled streaming with abort and disconnect detection; and
+- deterministic socket, file, thread-context, and session cleanup.
+
+## Streaming client
+
+`src/Media_client.c` implements:
+
+- a persistent interactive TCP connection;
+- deterministic parsing of menus and `SIZE` headers;
+- simultaneous download and playback through a process pipe;
+- FFmpeg/ffplay audio playback and mpv video playback;
+- raw-terminal controls: `SPACE` pauses/resumes video and `E` aborts the stream;
+- `SIGSTOP`/`SIGCONT` playback control plus graceful `SIGTERM` and bounded `SIGKILL` fallback;
+- `SIGPIPE`, `EPIPE`, player-window closure, interrupted calls, and server disconnect handling; and
+- restoration of the terminal and all file descriptors on success, abort, or failure.
+
+## Routed-network validation
 
 <p align="center">
-  <img src="images/client_streaming_demo.png" width="1200"/>
+  <img src="images/client_streaming_demo.png" width="48%" alt="Client receiving and playing a media stream" />
+  <img src="images/wireshark_validation.png" width="48%" alt="Wireshark validation of TCP media traffic" />
 </p>
 
-The client application supports:
-- Real-time video streaming
-- Real-time audio streaming
-- Interactive media selection
-- Stream interruption handling
-- Persistent TCP communication
+The system was exercised through two Cisco routers and multiple Linux subnets with static routes. Validation included:
 
----
+- end-to-end reachability and multi-hop routing;
+- TCP handshake, sequence and acknowledgement behavior;
+- persistent session continuity during multiple selections;
+- stream traffic and retransmission inspection in Wireshark;
+- graceful completion, client abort, and session termination; and
+- audio and video playback at the receiving endpoint.
 
-# Wireshark Validation
+## Build and run
 
-<p align="center">
-  <img src="images/wireshark_validation.png" width="1200"/>
-</p>
+Requirements: Linux or another POSIX environment, GCC, pthreads, FFmpeg/ffplay, and mpv.
 
-Wireshark was used extensively to validate:
-- TCP packet delivery
-- Stream continuity
-- Retransmissions
-- Session termination
-- Routed packet traversal across subnets
+```bash
+gcc -std=c11 -Wall -Wextra -pthread src/Media_server.c -o media_server
+gcc -std=c11 -Wall -Wextra src/Media_client.c -o media_client
 
----
+./media_server
+./media_client <server-ip>
+```
 
-# Features
+Before running, replace the demonstration paths in `media_files[]` with media files available on the server. Both programs use TCP port `9000`.
 
-- Multithreaded TCP media server
-- Real-time audio and video streaming
-- Custom application-layer protocol
-- Routed multi-subnet deployment
-- SDL-based video playback
-- FFmpeg/ffplay audio playback
-- Wireshark traffic validation
-- Graceful stream interruption handling
-- Persistent client-server sessions
-- Concurrent client support
-
----
-
-# Network Infrastructure
-
-## Topology
-
-- 2 Cisco routers
-- Multiple routed subnets
-- Static IP addressing
-- Point-to-point inter-router link
-- Linux-based server and clients
-
-## Routing
-
-Static routing was configured manually to enable:
-- End-to-end communication
-- Multi-hop streaming
-- Routed TCP traffic validation
-
----
-
-# Source Code Structure
+## Repository map
 
 ```text
 src/
-├── Media_server.c
-└── Media_client.c
+  Media_server.c   concurrent catalog and streaming server
+  Media_client.c   interactive receiver and playback client
+images/
+  network topology, architecture, demo, and Wireshark evidence
+docs/
+  tcp_multimedia_streaming_report.pdf
 ```
 
-### Media_server.c
-Responsible for:
-- Multithreaded client handling
-- Media streaming logic
-- Session management
-- TCP communication
+## Engineering tradeoffs and limitations
 
-### Media_client.c
-Responsible for:
-- Media selection interface
-- Stream reception
-- SDL rendering
-- Audio playback using FFmpeg
+- TCP provides ordered reliable delivery but can increase latency under loss through head-of-line blocking.
+- The protocol is intentionally small and readable; it does not currently include version negotiation, checksums, authentication, or encryption.
+- Media paths, port, buffer size, and throttling are compile-time configuration rather than runtime options.
+- Thread-per-client handling is appropriate for this lab scale; a production service would add bounded concurrency, backpressure, observability, and load testing.
+- FFmpeg/mpv are local playback dependencies rather than embedded codecs.
 
----
+## Skills demonstrated
 
-# Build and Run
+`C` · `POSIX sockets` · `TCP/IP` · `pthreads` · `select()` · `process control` · `signals` · `pipes` · `FFmpeg` · `mpv` · `Linux` · `Cisco routing` · `Wireshark`
 
-Typical local build flow:
+## Documentation
 
-```bash
-gcc src/Media_server.c -o media_server -lpthread
-gcc src/Media_client.c -o media_client -lSDL2
-```
-
-Run the server on the host machine, then connect from the client using the server IP address reachable across the routed topology.
+- [Full technical report](docs/tcp_multimedia_streaming_report.pdf)
+- [Source implementation notes](src/README.md)
 
 ---
 
-# Engineering Highlights
-
-- Designed a persistent TCP session for continuous media transfer.
-- Used multithreading to support responsive client handling.
-- Validated packet flow through Wireshark instead of relying only on application output.
-- Tested the system across routed subnets to exercise realistic networking behavior.
-
----
-
-# Technologies Used
-
-## Systems & Networking
-
-- C
-- TCP/IP
-- Socket Programming
-- Multithreading
-- Linux
-- Cisco Routing
-
-## Media & Analysis
-
-- SDL
-- FFmpeg
-- ffplay
-- Wireshark
-
----
-
-# Results
-
-| Metric | Result |
-|---|---|
-| Streaming Type | Real-time TCP streaming |
-| Architecture | Multithreaded client-server |
-| Network Environment | Routed multi-subnet topology |
-| Media Support | Audio + Video |
-| Validation Tools | Wireshark + Router CLI |
-| Playback Engine | SDL + FFmpeg |
-
----
-
-# Key Engineering Concepts
-
-- Persistent TCP connections
-- Application-layer protocol design
-- Thread synchronization
-- Real-time byte streaming
-- Packet analysis
-- Routed infrastructure deployment
-- Network performance evaluation
-- Concurrent client handling
-
----
-
-# Future Work
-
-- RTP/UDP streaming support
-- Adaptive buffering
-- Dynamic routing integration
-- Stream compression optimization
-- Multi-client scaling improvements
-- Network congestion handling
-
----
-
-# Documentation
-
-- [Full Technical Report](docs/tcp_multimedia_streaming_report.pdf)
-
----
-
-# Authors
-
-Hasan Al Hussein  
-Khalifa University
+Built by **Hasan Al Hussein** at Khalifa University.

@@ -1,4 +1,3 @@
-Media_server.c (server c-code):
 // media_server.c - TCP multimedia server that stays open
 // - Sends a menu
 // - Accepts choices in a loop from one client
